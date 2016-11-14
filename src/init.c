@@ -55,6 +55,16 @@ int shmem_internal_global_exit_called = 0;
 
 int shmem_internal_thread_level;
 int shmem_internal_debug = 0;
+ 
+#ifdef SHMEM_HETEROMEM_H
+extern char **environ;
+#define MAXSTRING 128
+#define BASESTR "SMA_SYMMETRIC_PARTITION"
+#define BASESTR2 "SHMEM_SYMMETRIC_PARTITION"
+shmem_partition_t symheap_partition[SHM_INTERNAL_MAX_PARTITIONS] = {{ 0 }};
+int shmem_internal_defined_partitions = 0;
+#endif
+
 
 #ifdef ENABLE_THREADS
 shmem_internal_mutex_t shmem_internal_mutex_alloc;
@@ -174,6 +184,9 @@ shmem_internal_init(int tl_requested, int *tl_provided)
                                                                     2 * 1024 * 1024);
     }
 #endif
+
+    /* Parse Envs for symmetric partitions */ 
+    shmem_internal_parse_partition_env();
 
     /* Find symmetric data */
 #ifdef __APPLE__
@@ -407,4 +420,74 @@ shmem_internal_global_exit(int status)
 
     shmem_internal_global_exit_called = 1;
     shmem_runtime_abort(status, str);
+}
+
+
+#define S_MAXSTR 257
+static int runregex(regex_t *compiled_regex, int max_match, char *str_input, char str_array[][S_MAXSTR])
+{
+    int i, matches, m;
+    regmatch_t group[8];
+
+    if (max_match > 8)
+        return -2;
+
+    m = 0;
+    matches = regexec(compiled_regex, str_input, max_match, group, 0);
+    //          printf ("mymatch %d\n", mymatch);
+    if (matches == 0)
+    {
+       for (i=0; i < max_match; i++)
+       {
+           if (group[i].rm_so == -1)
+               break;
+           int start = (int) group[i].rm_so;
+           int finish = (int) group[i].rm_eo;
+           int numchars = finish-start;
+           strncpy(str_array[i], str_input + group[i].rm_so, numchars);
+           str_array[i][numchars] = '\0';
+
+//           printf("%d %d %s\n", i, numchars,  str_array[i]);
+//           printf("start : %d finish %d\n", start, finish);
+           m++;
+        }
+     }
+     return m;
+}
+
+void shmem_internal_parse_partition_env(void)
+{
+    char **env;
+    int mymatch, i,j;
+    char myrexpr[] = "^(SHMEM|SMA)_SYMMETRIC_SIZE([0-9]+)=(.*)$";
+
+    regmatch_t group[8]
+    regex_t regex_comp;
+    
+
+   char tmpstr[8][MAXSTR];
+   // tmpstr = (char **) malloc(6 * sizeof(char *));
+   // for (i=0; i< 6;i++)
+   //     tmpstr[i] - (char *) malloc(MAXSTR * sizeof(char));
+
+    unsigned long heap_start, heap_end,  next_start, next_end;
+    env = environ;
+
+    regcomp(&regex_comp, myrexpr, REG_EXTENDED);
+
+    for (i=0; *env != NULL; )
+    {
+        mymatch = runregex(&regex_comp, MAXMATCH, *env, tmpstr);
+        if (mymatch != 0)
+        {
+            printf("mymatch %d\n", mymatch);
+            for (j=0; j< mymatch; j++)
+            {
+                printf("%d : %s\n", j, tmpstr[j]);
+            }
+            printf("\n");
+        }
+        env++;
+
+    }
 }
