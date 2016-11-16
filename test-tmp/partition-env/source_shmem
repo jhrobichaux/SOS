@@ -1,0 +1,2 @@
+export PATH=/home/jrobicha/local/sos-1/bin:$PATH
+export LD_LIBRARY_PATH=/home/jrobicha/local/sos-1/lib:/home/jrobicha/local/ofi/libfabric/lib:$LD_LIBRARY_PATH

@@ -527,6 +527,7 @@ static int get_partition_option(shmem_partition_t *sp, char *rhs, char *e)
 	return 0;
 }
 
+/* Sort partition array in ascending order. */
 static void sort_partitions(shmem_partition_t A[], int n )
 {
 	int i, j;
@@ -549,7 +550,7 @@ static void sort_partitions(shmem_partition_t A[], int n )
 int shmem_internal_parse_partition_env(void)
 {
     char **env;
-    int i,j, num, rc;
+    int i,j, num, id, idcount, rc;
     char rhs[MAXSTRING];
     char *str1, *p, *saveptr1;
     size_t slen;
@@ -687,6 +688,24 @@ int shmem_internal_parse_partition_env(void)
     	rc |= 1;
     }
     
+    /* Check for multiple partitions defined with same  id  */
+    for (i=1; i<shmem_internal_defined_partitions+1; i++)
+    {
+    	id = symheap_partition[i].id;
+    	idcount = 0;
+    	for (j=i+1; j <shmem_internal_defined_partitions+1; j++)
+    	{
+    		if (id == symheap_partition[j].id) 
+    			idcount++;
+    	}
+    	if (idcount > 0)
+    	{
+    		fprintf(stderr,"ERROR: Multiple partitions defined for partition id %d.\n", id);
+    		rc |= 1;
+    		break;
+    	}
+    }
+    
    	if (shmem_internal_debug > 0)
    	{
    		fprintf(stdout,"Debug: shmem_internal_defined_partitions : %d\n", shmem_internal_defined_partitions);
@@ -694,7 +713,6 @@ int shmem_internal_parse_partition_env(void)
    		{
    			fprintf(stdout,"Debug: Partition # : %d\n", i);
    			shmem_partition_print_info(&symheap_partition[i]);   
-   			
    		}
    	}
     
