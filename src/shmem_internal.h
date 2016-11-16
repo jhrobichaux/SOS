@@ -213,6 +213,7 @@ extern shmem_internal_mutex_t shmem_internal_mutex_alloc;
 
 #define SHM_INTERNAL_MAX_PARTITIONS 8
 #define SHM_INTERNAL_MAX_PARTITION_ID 128
+#define SHM_INTERNAL_MSPACE_EXTRA (128*sizeof(size_t))
 
 enum kind_type_t {
     KIND_DEFAULT = 0,
@@ -236,10 +237,12 @@ struct shmem_partition_t {
     unsigned int id;
     kind_type_t kind;
     policy_type_t policy;
+    int fd;
     unsigned long pgsize;
     unsigned long size;
+    unsigned long size_allocated;
     void *start_address;
-    void *mspace;  /* need to modify */
+    void *msp; 
 };
 
 typedef struct shmem_partition_t shmem_partition_t;
@@ -250,7 +253,7 @@ extern int shmem_internal_defined_partitions;
 
 /* Procedure prototypes */
 
-void shmem_internal_parse_partition_env(void);
+int shmem_internal_parse_partition_env(void);
 /* TBD */
 
 /* Intended for debug information */
@@ -260,9 +263,11 @@ static inline void shmem_partition_print_info(shmem_partition_t *p)
     printf("\tPartition Kind       : %d\n",p->kind);
     printf("\tPartition Policy     : %d\n",p->policy);
     printf("\tPartition Page Size  : %lu\n",p->pgsize);
+    printf("\tPartition File Desc  : %d\n",p->fd);
     printf("\tPartition Size       : %lu\n",p->size);
+    printf("\tPartition Size Alloc : %lu\n",p->size_allocated);
     printf("\tPartition Start Addr : %p\n", p->start_address);
-    printf("\tPartition Mspace     : %p\n", p->mspace);
+    printf("\tPartition Mspace     : %p\n", p->msp);
 }
 
 #endif /* SHMEM_HETEROMEM_H */

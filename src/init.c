@@ -23,6 +23,8 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <regex.h>
 
 #define SHMEM_INTERNAL_INCLUDE
 #include "shmem.h"
@@ -31,6 +33,7 @@
 #include "shmem_collectives.h"
 #include "shmem_comm.h"
 #include "runtime.h"
+
 
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
@@ -58,9 +61,7 @@ int shmem_internal_debug = 0;
  
 #ifdef SHMEM_HETEROMEM_H
 extern char **environ;
-#define MAXSTRING 128
-#define BASESTR "SMA_SYMMETRIC_PARTITION"
-#define BASESTR2 "SHMEM_SYMMETRIC_PARTITION"
+#define MAXSTRING 257
 shmem_partition_t symheap_partition[SHM_INTERNAL_MAX_PARTITIONS] = {{ 0 }};
 int shmem_internal_defined_partitions = 0;
 #endif
@@ -169,24 +170,20 @@ shmem_internal_init(int tl_requested, int *tl_provided)
     /* Process environment variables */
     radix = shmem_util_getenv_long("COLL_RADIX", 0, 4);
     crossover = shmem_util_getenv_long("COLL_CROSSOVER", 0, 4);
-    heap_size = shmem_util_getenv_long("SYMMETRIC_SIZE", 1, 512 * 1024 * 1024);
+
     eager_size = shmem_util_getenv_long("BOUNCE_SIZE", 1, 2048);
     heap_use_malloc = shmem_util_getenv_long("SYMMETRIC_HEAP_USE_MALLOC", 0, 0);
     shmem_internal_debug = (NULL != shmem_util_getenv_str("DEBUG")) ? 1 : 0;
 
-    /* huge page support only on Linux for now, default is to use 2MB large pages */
-#ifdef __linux__
-    if (heap_use_malloc == 0) {
-        shmem_internal_heap_use_huge_pages=
-             (shmem_util_getenv_str("SYMMETRIC_HEAP_USE_HUGE_PAGES") != NULL) ? 1 : 0;
-        shmem_internal_heap_huge_page_size = shmem_util_getenv_long("SYMMETRIC_HEAP_PAGE_SIZE",
-                                                                    1,
-                                                                    2 * 1024 * 1024);
-    }
-#endif
 
     /* Parse Envs for symmetric partitions */ 
-    shmem_internal_parse_partition_env();
+    ret = shmem_internal_parse_partition_env();
+    if (0 != ret) {
+    	fprintf(stderr,
+    	                "[%03d] ERROR: Processing environment variables for symmetric heap failed: %d\n",
+    	                shmem_internal_my_pe, ret);
+    	goto cleanup;
+    }
 
     /* Find symmetric data */
 #ifdef __APPLE__
@@ -410,7 +407,6 @@ void shmem_internal_finalize(void)
     shmem_internal_shutdown(1);
 }
 
-
 void
 shmem_internal_global_exit(int status)
 {
@@ -423,13 +419,42 @@ shmem_internal_global_exit(int status)
 }
 
 
+/* Stuff below for partitions */
+/* atol() + optional scaled suffix recognition: 1K, 2M, 3G, 1T */
+static long
+init_atol_scaled(char *s)
+{
+    long val;
+    char *e;
+    errno = 0;
+
+    val = strtol(s,&e,0);
+    if(errno != 0 || e == s) {
+        shmem_runtime_abort(1, "env var conversion");
+    }
+    if (e == NULL || *e =='\0')
+        return val;
+
+    if (*e == 'K')
+        val *= 1024L;
+    else if (*e == 'M')
+        val *= 1024L*1024L;
+    else if (*e == 'G')
+        val *= 1024L*1024L*1024L;
+    else if (*e == 'T')
+        val *= 1024L*1024L*1024L*1024L;
+
+    return val;
+}
+
 #define S_MAXSTR 257
+#define S_MAXREGEXMATCH 8
 static int runregex(regex_t *compiled_regex, int max_match, char *str_input, char str_array[][S_MAXSTR])
 {
     int i, matches, m;
-    regmatch_t group[8];
+    regmatch_t group[S_MAXREGEXMATCH];
 
-    if (max_match > 8)
+    if (max_match > S_MAXREGEXMATCH)
         return -2;
 
     m = 0;
@@ -455,39 +480,226 @@ static int runregex(regex_t *compiled_regex, int max_match, char *str_input, cha
      return m;
 }
 
-void shmem_internal_parse_partition_env(void)
+static int get_partition_option(shmem_partition_t *sp, char *rhs, char *e)
+{
+	char *s1, *s2, *saveptr2;
+	
+	s1 = strtok_r(rhs, "=", &saveptr2);
+	s2 = strtok_r(NULL, "=", &saveptr2);
+	
+	if (strncmp(s1,"size",5) == 0)
+	{
+		sp->size = init_atol_scaled(s2);
+	} else if (strncmp(s1,"kind", 5) == 0)
+	{
+		if(strncmp(s2,"D",1) == 0)
+		{
+			sp->kind = KIND_DEFAULT;
+		} else if(strncmp(s2,"F",1) == 0)
+		{
+			sp->kind = KIND_FASTMEM;
+		} else {
+			fprintf(stderr,"ERROR: incorrect kind value for environment variable: %s\n", e);
+			return -1;
+		}
+	} else if (strncmp(s1,"policy", 7) == 0)
+	{
+		if(strncmp(s2,"M",1) == 0)
+		{
+			sp->policy = POLICY_DEFAULT;
+		} else if(strncmp(s2,"I",1) == 0)
+		{
+			sp->policy = POLICY_INTERLEAVED;
+		}  else if(strncmp(s2,"P",1) == 0)
+		{
+			sp->policy = POLICY_POLICY1;
+		} else {
+			fprintf(stderr,"ERROR: incorrect policy value for environment variable: %s\n", e);
+			return -1;
+		}
+	} else if (strncmp(s1,"pgsize", 7) == 0)
+	{
+		sp->pgsize = init_atol_scaled(s2);
+	} else {
+		fprintf(stderr,"ERROR: Unrecognized symmetric partition option for environment variable: %s\n", e);
+		return -1;
+	}
+	return 0;
+}
+
+static void sort_partitions(shmem_partition_t A[], int n )
+{
+	int i, j;
+	shmem_partition_t tmp_part;
+	
+	for (i=0; i < (n-1); i++)
+	{
+		for (j=0; j < (n-i-1); j++)
+		{
+			if (A[j].id > A[j+1].id)
+			{
+				memcpy(&tmp_part, &A[j], sizeof(shmem_partition_t));
+				memcpy(&A[j], &A[j+1], sizeof(shmem_partition_t));
+				memcpy(&A[j+1], &tmp_part, sizeof(shmem_partition_t));
+			}
+		}
+	}
+}
+
+int shmem_internal_parse_partition_env(void)
 {
     char **env;
-    int mymatch, i,j;
-    char myrexpr[] = "^(SHMEM|SMA)_SYMMETRIC_SIZE([0-9]+)=(.*)$";
-
-    regmatch_t group[8]
-    regex_t regex_comp;
+    int i,j, num, rc;
+    char rhs[MAXSTRING];
+    char *str1, *p, *saveptr1;
+    size_t slen;
     
+    char sym_partition_rexpr[] = "^(SHMEM|SMA)_SYMMETRIC_PARTITION([0-9]+)=(.*)$";
+    char sym_size_rexpr[] = "^(SHMEM|SMA)_SYMMETRIC_SIZE=(.*)$";
+    regex_t sym_partition_recomp;
+    regex_t sym_size_recomp;
+    char sym_partition_tmpstr[4][MAXSTRING];
+    char sym_size_tmpstr[3][MAXSTRING];
+    int sym_partition_match, sym_size_match;
+    int sym_size_set = 0;
+    long heap_use_malloc = 0;
+    
+    unsigned long default_heap_size = 512 * 1024 * 1024;
+    unsigned long default_page_size = 4 * 1024;
+    
+    rc = 0;
+    /* Huge page envs*/
+    /* huge page support only on Linux for now, default is to use 2MB large pages */
+#ifdef __linux__
+    heap_use_malloc = shmem_util_getenv_long("SYMMETRIC_HEAP_USE_MALLOC", 0, 0);
+    if (heap_use_malloc == 0) {
+        shmem_internal_heap_use_huge_pages=
+             (shmem_util_getenv_str("SYMMETRIC_HEAP_USE_HUGE_PAGES") != NULL) ? 1 : 0;
+        shmem_internal_heap_huge_page_size = shmem_util_getenv_long("SYMMETRIC_HEAP_PAGE_SIZE",
+                                                                    1,
+                                                                    2 * 1024 * 1024);
+    }
+#endif
 
-   char tmpstr[8][MAXSTR];
-   // tmpstr = (char **) malloc(6 * sizeof(char *));
-   // for (i=0; i< 6;i++)
-   //     tmpstr[i] - (char *) malloc(MAXSTR * sizeof(char));
-
-    unsigned long heap_start, heap_end,  next_start, next_end;
+	/* 
+	 * group	description
+	 * 1		SHMEM || SMA
+	 * 2		Partition id
+	 * 3		Right hand side
+	 */
+    regcomp(&sym_partition_recomp, sym_partition_rexpr, REG_EXTENDED);
+    
+	/* 
+	 * group	description
+	 * 1		SHMEM || SMA
+	 * 2		Right hand side
+	 */
+    regcomp(&sym_size_recomp, sym_size_rexpr, REG_EXTENDED);
+    
+    shmem_internal_defined_partitions = 0;
     env = environ;
-
-    regcomp(&regex_comp, myrexpr, REG_EXTENDED);
-
-    for (i=0; *env != NULL; )
+    for (i=1; *env != NULL; )
     {
-        mymatch = runregex(&regex_comp, MAXMATCH, *env, tmpstr);
-        if (mymatch != 0)
+        sym_partition_match = runregex(&sym_partition_recomp, 4, *env, sym_partition_tmpstr);
+        sym_size_match = runregex(&sym_size_recomp, 3, *env, sym_size_tmpstr);
+        
+        if (sym_partition_match != 0) /* match SYMMETRIC_PARTITION */
         {
+        	if (i > SHM_INTERNAL_MAX_PARTITIONS-1)
+        	{
+        		fprintf(stderr,"ERROR: Max partitions reached\n");
+        		rc |= 1;
+        		break;
+        	}
+        	
+        	num = atoi(sym_partition_tmpstr[2]);
+        	if (num > 127 || num < 1) 
+        	{
+        		fprintf(stderr,"ERROR: Partition ID (%d) is not in range of 1-127\n", num);
+        		rc |= 1;
+        	}
+        	symheap_partition[i].id = num;
+        	
+        	/* Initialize defaults */
+        	symheap_partition[i].pgsize = 4 * 1024;
+        	symheap_partition[i].kind = KIND_DEFAULT;
+        	symheap_partition[i].policy = POLICY_DEFAULT;
+        	
+        	slen = strnlen(sym_partition_tmpstr[3],MAXSTRING);
+        	strncpy(rhs,sym_partition_tmpstr[3],slen);
+        	
+        	/* Loop over tokens delimeted by ':' */
+        	p = strtok_r(rhs,":",&saveptr1);
+        	while (p != NULL)
+        	{
+        		rc |= get_partition_option(&symheap_partition[i], p, *env);
+        		p = strtok_r(NULL,":",&saveptr1);
+        	}
+        	if (shmem_internal_debug > 0)
+        	{
+                fprintf(stdout,"Debug: shmem_internal_parse_partition_env \n");
+                fprintf(stdout,"Debug: SHMEM_SYMMETRIC_PARTIION = %s\n", *env);
+                shmem_partition_print_info(&symheap_partition[i]);       		
+        	}
+        	shmem_internal_defined_partitions = i;
+        	i++;	
+#if 0
             printf("mymatch %d\n", mymatch);
             for (j=0; j< mymatch; j++)
             {
-                printf("%d : %s\n", j, tmpstr[j]);
+                printf("%d : %s\n", j, sym_partition_tmpstr[j]);
             }
             printf("\n");
+#endif
+        } else if (sym_size_match != 0)   /* SYMMETRIC_SIZE */
+        {
+        	sym_size_set = 1;
+        	default_heap_size = init_atol_scaled(sym_size_tmpstr[2]);
         }
         env++;
-
+        
     }
+    
+    /* Default partition is partition 1*/
+    if (shmem_internal_defined_partitions == 0)
+    {
+    	symheap_partition[1].id = 1;
+    	symheap_partition[1].size = default_heap_size;
+    	symheap_partition[1].pgsize = default_page_size;
+    	symheap_partition[1].kind = KIND_DEFAULT;
+    	symheap_partition[1].policy = POLICY_DEFAULT;
+    	
+    	if (shmem_internal_heap_use_huge_pages != 0)
+    		symheap_partition[1].pgsize = shmem_internal_heap_huge_page_size;
+    	
+    	shmem_internal_defined_partitions = 1;
+    } else if (sym_size_set != 0)  
+    {
+    	fprintf(stderr,"ERROR: Cannot set both SYMMETRIC_SIZE and SYMMETRIC_PARTITIONS\n");
+    	rc |= 1;
+    }
+    
+    sort_partitions(&symheap_partition[1], shmem_internal_defined_partitions);
+    
+    if (symheap_partition[1].id != 1) /* There must be a partition id 1 */
+    {
+    	fprintf(stderr,"ERROR: Partition #1 must be defined.\n");
+    	rc |= 1;
+    }
+    
+   	if (shmem_internal_debug > 0)
+   	{
+   		fprintf(stdout,"Debug: shmem_internal_defined_partitions : %d\n", shmem_internal_defined_partitions);
+   		for (i=1;i<shmem_internal_defined_partitions+1; i++)
+   		{
+   			fprintf(stdout,"Debug: Partition # : %d\n", i);
+   			shmem_partition_print_info(&symheap_partition[i]);   
+   			
+   		}
+   	}
+    
+    regfree(&sym_partition_recomp);
+    regfree(&sym_size_recomp);
+    
+    return rc;
 }
