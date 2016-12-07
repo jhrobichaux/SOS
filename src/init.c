@@ -59,7 +59,7 @@ int shmem_internal_global_exit_called = 0;
 int shmem_internal_thread_level;
 int shmem_internal_debug = 0;
  
-#ifdef SHMEM_HETEROMEM_H
+#ifdef ENABLE_HETEROGENEOUS_MEM
 extern char **environ;
 #define MAXSTRING 257
 shmem_partition_t symheap_partition[SHM_INTERNAL_MAX_PARTITIONS] = {{ 0 }};
@@ -175,7 +175,9 @@ shmem_internal_init(int tl_requested, int *tl_provided)
     heap_use_malloc = shmem_util_getenv_long("SYMMETRIC_HEAP_USE_MALLOC", 0, 0);
     shmem_internal_debug = (NULL != shmem_util_getenv_str("DEBUG")) ? 1 : 0;
 
-
+#ifndef USE_HETEROGENEOUS_MEM
+    heap_size = shmem_util_getenv_long("SYMMETRIC_SIZE", 1, 512 * 1024 * 1024);
+#else
     /* Parse Envs for symmetric partitions */ 
     ret = shmem_internal_parse_partition_env();
     if (0 != ret) {
@@ -184,6 +186,7 @@ shmem_internal_init(int tl_requested, int *tl_provided)
     	                shmem_internal_my_pe, ret);
     	goto cleanup;
     }
+#endif
 
     /* Find symmetric data */
 #ifdef __APPLE__
@@ -418,7 +421,9 @@ shmem_internal_global_exit(int status)
     shmem_runtime_abort(status, str);
 }
 
-
+#ifdef ENABLE_HETEROGENEOUS_MEM
+#define S_MAXSTR 257
+#define S_MAXREGEXMATCH 8
 /* Stuff below for partitions */
 /* atol() + optional scaled suffix recognition: 1K, 2M, 3G, 1T */
 static long
@@ -447,8 +452,6 @@ init_atol_scaled(char *s)
     return val;
 }
 
-#define S_MAXSTR 257
-#define S_MAXREGEXMATCH 8
 static int runregex(regex_t *compiled_regex, int max_match, char *str_input, char str_array[][S_MAXSTR])
 {
     int i, matches, m;
@@ -614,7 +617,7 @@ int shmem_internal_parse_partition_env(void)
         	}
         	
         	num = atoi(sym_partition_tmpstr[2]);
-        	if (num > 127 || num < 1) 
+        	if (num >= SHM_INTERNAL_MAX_PARTITION_ID || num < 1)
         	{
         		fprintf(stderr,"ERROR: Partition ID (%d) is not in range of 1-127\n", num);
         		rc |= 1;
@@ -721,3 +724,4 @@ int shmem_internal_parse_partition_env(void)
     
     return rc;
 }
+#endif /* ENABLE_HETEROGENEOUS_MEM */

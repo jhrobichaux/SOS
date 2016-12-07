@@ -208,12 +208,12 @@ extern shmem_internal_mutex_t shmem_internal_mutex_alloc;
 
 #endif /* ENABLE_THREADS */
 
-#ifndef SHMEM_HETEROMEM_H
-#define SHMEM_HETEROMEM_H
+#ifdef ENABLE_HETEROGENEOUS_MEM
 
 #define SHM_INTERNAL_MAX_PARTITIONS 8
 #define SHM_INTERNAL_MAX_PARTITION_ID 128
 #define SHM_INTERNAL_MSPACE_EXTRA (128*sizeof(size_t))
+#define SHM_INTERNAL_PARTITION_OVERHEAD (1<<20)
 
 enum kind_type_t {
     KIND_DEFAULT = 0,
@@ -233,6 +233,35 @@ enum policy_type_t {
 typedef enum kind_type_t kind_type_t;
 typedef enum policy_type_t policy_type_t;
 
+struct shmem_mmap_opts_t {
+	int prot;
+	int flags;
+	int fd;
+	off_t offset;
+	char *file_name;
+};
+
+struct shmem_mbind_opts_t {
+	int mode
+	unsigned long *nodemask;
+	unsigned long maxnode;
+	unsigned flags;
+};
+
+struct shmem_madvise_opts_t {
+	int advice;
+};
+
+typedef struct shmem_mmap_opts_t struct shmem_mmap_opts_t ;
+
+struct shmem_meminfo_t {
+	struct shmem_mmap_opts_t mmap;
+	struct shmem_mbind_opts_t mbind;
+	struct shmem_madvise_opts_t madvise;
+};
+
+typedef struct shmem_meminfo_t shmem_meminfo_t;
+
 struct shmem_partition_t {
     unsigned int id;
     kind_type_t kind;
@@ -243,6 +272,7 @@ struct shmem_partition_t {
     unsigned long size_allocated;
     void *start_address;
     void *msp; 
+    shmem_meminfo_t meminfo;
 };
 
 typedef struct shmem_partition_t shmem_partition_t;
@@ -269,8 +299,7 @@ static inline void shmem_partition_print_info(shmem_partition_t *p)
     printf("\tPartition Start Addr : %p\n", p->start_address);
     printf("\tPartition Mspace     : %p\n", p->msp);
 }
-
-#endif /* SHMEM_HETEROMEM_H */
+#endif /* ENABLE_HETEROGENEOUS_MEM */
 
 void shmem_internal_start_pes(int npes);
 void shmem_internal_init(int tl_requested, int *tl_provided);

@@ -12,6 +12,7 @@
 
 #include "config.h"
 
+#include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -29,6 +30,9 @@
 
 #ifdef ENABLE_PROFILING
 #include "pshmem.h"
+
+/* Use dlmalloc.h instead of defining dlmalloc prototypes */
+#include "dlmalloc.h"
 
 #pragma weak shmem_malloc = pshmem_malloc
 #define shmem_malloc pshmem_malloc
@@ -59,10 +63,7 @@
 static char *shmem_internal_heap_curr = NULL;
 static int shmem_internal_use_malloc = 0;
 
-void* dlmalloc(size_t);
-void  dlfree(void*);
-void* dlrealloc(void*, size_t);
-void* dlmemalign(size_t, size_t);
+
 
 /*
  * scan /proc/mounts for a huge page file system with the
@@ -147,7 +148,7 @@ shmem_internal_get_next(intptr_t incr)
 #define ONEGIG (1024UL*1024UL*1024UL)
 static void *mmap_alloc(size_t bytes)
 {
-    char *file_name;
+    char *file_name = NULL;
     int fd = 0;
     char *directory = NULL;
     const char basename[] = "hugepagefile.SOS";
@@ -197,11 +198,17 @@ static void *mmap_alloc(size_t bytes)
                0);
     if (ret == MAP_FAILED) {
         RAISE_WARN_STR("mmap for symmetric heap failed");
-        return NULL;
+        ret = NULL;
     }
     if (fd) {
         unlink(file_name);
         close(fd);
+    }
+    if (directory) {
+        free(directory);
+    }
+    if (file_name) {
+        free(file_name);
     }
     return ret;
 }
