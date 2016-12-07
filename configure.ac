@@ -47,6 +47,11 @@ if test -z "$enable_picky" && test -d .svn -o -d .hg ; then
     enable_picky=yes
 fi
 
+AC_ARG_ENABLE([heteromem],
+    [AC_HELP_STRING([--enable-heteromem],
+                    [Enable heterogeneous memory (default:disabled)])])
+AS_IF([test "$enable_heteromem" = "yes"], [AC_DEFINE([ENABLE_HETEROGENEOUS_MEM], [1], [Enable heterogeneous memory])])
+
 AC_ARG_ENABLE([error-checking],
     [AC_HELP_STRING([--enable-error-checking],
                     [Enable error checking for SHMEM calls (default:disabled)])])
