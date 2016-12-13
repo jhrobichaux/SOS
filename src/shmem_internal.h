@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <sys/mman.h>
+
 #include "shmemx.h"
 #include "runtime.h"
 #include "config.h"
@@ -213,7 +215,7 @@ extern shmem_internal_mutex_t shmem_internal_mutex_alloc;
 #define SHM_INTERNAL_MAX_PARTITIONS 8
 #define SHM_INTERNAL_MAX_PARTITION_ID 128
 #define SHM_INTERNAL_MSPACE_EXTRA (128*sizeof(size_t))
-#define SHM_INTERNAL_PARTITION_OVERHEAD (1<<20)
+#define SHM_INTERNAL_RUNTIME_PARTITION_SIZE (1UL<<20)
 
 enum kind_type_t {
     KIND_DEFAULT = 0,
@@ -242,17 +244,17 @@ struct shmem_mmap_opts_t {
 };
 
 struct shmem_mbind_opts_t {
-	int mode
-	unsigned long *nodemask;
+	int mode;
 	unsigned long maxnode;
 	unsigned flags;
+	unsigned long *nodemask;
 };
 
 struct shmem_madvise_opts_t {
 	int advice;
 };
 
-typedef struct shmem_mmap_opts_t struct shmem_mmap_opts_t ;
+//typedef struct shmem_mmap_opts_t shmem_mmap_opts_t ;
 
 struct shmem_meminfo_t {
 	struct shmem_mmap_opts_t mmap;
@@ -282,22 +284,44 @@ extern shmem_partition_t symheap_partition[SHM_INTERNAL_MAX_PARTITIONS];
 extern int shmem_internal_defined_partitions;
 
 /* Procedure prototypes */
-
 int shmem_internal_parse_partition_env(void);
+int shmem_internal_get_partition_index_from_addr(void * ptr);
+int shmem_internal_get_partition_index_from_id(int partition_id);
+
 /* TBD */
 
 /* Intended for debug information */
+static inline void shmem_partition_print_meminfo(shmem_meminfo_t *m)
+{
+	printf("\t\tMEM.prot       : 0x%x\n",m->mmap.prot);
+	printf("\t\tMEM.flags      : 0x%x\n",m->mmap.flags);
+	printf("\t\tMEM.fd         : %d\n", m->mmap.fd);
+	printf("\t\tMEM.offset     : %ld\n", (long int) m->mmap.offset);
+	if (m->mmap.file_name != NULL )
+	{
+		printf("\t\tMEM.filename   : %s\n",m->mmap.file_name);
+	} else {
+		printf("\t\tMEM.filename   : %s\n", "NULL");
+	}
+	printf("\t\tMBIND.mode     : %d\n",m->mbind.mode);
+	printf("\t\tMBIND.maxnode  : %lu\n",m->mbind.maxnode);
+	printf("\t\tMBIND.flags    : 0x%x\n",m->mbind.flags);
+	//printf("\t\tMBIND.nodemask    : %d\n",m->mbind.mode);
+	printf("\t\tMADVISE.advice : %d\n",m->madvise.advice);
+}
+
 static inline void shmem_partition_print_info(shmem_partition_t *p)
 {
-    printf("Partition ID         : %u\n",p->id);
-    printf("\tPartition Kind       : %d\n",p->kind);
-    printf("\tPartition Policy     : %d\n",p->policy);
-    printf("\tPartition Page Size  : %lu\n",p->pgsize);
-    printf("\tPartition File Desc  : %d\n",p->fd);
-    printf("\tPartition Size       : %lu\n",p->size);
-    printf("\tPartition Size Alloc : %lu\n",p->size_allocated);
-    printf("\tPartition Start Addr : %p\n", p->start_address);
-    printf("\tPartition Mspace     : %p\n", p->msp);
+    printf("Partition ID          : %u\n",p->id);
+    printf("\tPartition Kind        : %d\n",p->kind);
+    printf("\tPartition Policy      : %d\n",p->policy);
+    printf("\tPartition Page Size   : %lu\n",p->pgsize);
+    printf("\tPartition File Desc   : %d\n",p->fd);
+    printf("\tPartition Size        : %lu\n",p->size);
+    printf("\tPartition Size Alloc  : %lu\n",p->size_allocated);
+    printf("\tPartition Start Addr  : %p\n", p->start_address);
+    printf("\tPartition End Addr    : %p\n", p->start_address+p->size_allocated);
+    printf("\tPartition Mspace      : %p\n", p->msp);
 }
 #endif /* ENABLE_HETEROGENEOUS_MEM */
 

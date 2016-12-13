@@ -560,11 +560,11 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define HAVE_MORECORE 0
 #define HAVE_MMAP 1
 #ifdef __linux__
-#define HAVE_MREMAP 1
+#define HAVE_MREMAP 0
 #else 
 #define HAVE_MREMAP 0
 #endif
-/* #define ONLY_MSPACES 1 */
+#define ONLY_MSPACES 1
 #define MSPACES 1
 #endif
 /* END SHMEM CHANGES */

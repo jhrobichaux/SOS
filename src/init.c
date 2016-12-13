@@ -64,6 +64,7 @@ extern char **environ;
 #define MAXSTRING 257
 shmem_partition_t symheap_partition[SHM_INTERNAL_MAX_PARTITIONS] = {{ 0 }};
 int shmem_internal_defined_partitions = 0;
+int shmem_internal_parse_partition_env();
 #endif
 
 
@@ -175,7 +176,7 @@ shmem_internal_init(int tl_requested, int *tl_provided)
     heap_use_malloc = shmem_util_getenv_long("SYMMETRIC_HEAP_USE_MALLOC", 0, 0);
     shmem_internal_debug = (NULL != shmem_util_getenv_str("DEBUG")) ? 1 : 0;
 
-#ifndef USE_HETEROGENEOUS_MEM
+#ifndef ENABLE_HETEROGENEOUS_MEM
     heap_size = shmem_util_getenv_long("SYMMETRIC_SIZE", 1, 512 * 1024 * 1024);
 #else
     /* Parse Envs for symmetric partitions */ 
@@ -550,7 +551,7 @@ static void sort_partitions(shmem_partition_t A[], int n )
 	}
 }
 
-int shmem_internal_parse_partition_env(void)
+int shmem_internal_parse_partition_env()
 {
     char **env;
     int i,j, num, id, idcount, rc;
@@ -685,6 +686,13 @@ int shmem_internal_parse_partition_env(void)
     
     sort_partitions(&symheap_partition[1], shmem_internal_defined_partitions);
     
+    /* Define 'runtime only' partition */
+    symheap_partition[0].id = 0;
+	symheap_partition[0].size = SHM_INTERNAL_RUNTIME_PARTITION_SIZE;
+	symheap_partition[0].pgsize = default_page_size;
+	symheap_partition[0].kind = KIND_DEFAULT;
+	symheap_partition[0].policy = POLICY_DEFAULT;
+
     if (symheap_partition[1].id != 1) /* There must be a partition id 1 */
     {
     	fprintf(stderr,"ERROR: Partition #1 must be defined.\n");
@@ -709,6 +717,7 @@ int shmem_internal_parse_partition_env(void)
     	}
     }
     
+#if 0
    	if (shmem_internal_debug > 0)
    	{
    		fprintf(stdout,"Debug: shmem_internal_defined_partitions : %d\n", shmem_internal_defined_partitions);
@@ -718,6 +727,7 @@ int shmem_internal_parse_partition_env(void)
    			shmem_partition_print_info(&symheap_partition[i]);   
    		}
    	}
+#endif
     
     regfree(&sym_partition_recomp);
     regfree(&sym_size_recomp);

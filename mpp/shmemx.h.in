@@ -39,5 +39,7 @@ void shmemx_ct_free(shmemx_ct_t *ct);
 long shmemx_ct_get(shmemx_ct_t ct);
 void shmemx_ct_set(shmemx_ct_t ct, long value);
 void shmemx_ct_wait(shmemx_ct_t ct, long wait_for);
+void *shmemx_kind_malloc(size_t size, int partition_id);
+void *shmemx_kind_align(size_t alignment, size_t size, int partition_id);
 
 #endif /* SHMEMX_H */
